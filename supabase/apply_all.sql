@@ -2099,61 +2099,67 @@ on conflict (role, menu_path) do nothing;
 create or replace function public.assert_parcel_geometry(
   p_lokasi_id uuid,
   p_exclude_parcel_id uuid,
-  p_geometry geometry
+  p_new geometry
 )
 returns void
 language plpgsql
 as $$
 declare
   v_parent geometry;
-  v_overlap_count integer;
-  v_2d geometry;
+  v_conflict record;
+  v_tolerance_m2 constant double precision := 0.01;
 begin
-  if p_geometry is null then
+  if p_new is null then
     return;
   end if;
 
-  v_2d := st_force2d(p_geometry);
+  p_new := st_force2d(p_new);
 
-  if st_geometrytype(v_2d) <> 'ST_Polygon' then
-    raise exception 'Geometry harus berupa Polygon.'
-      using errcode = 'GDE00';
+  if st_geometrytype(p_new) <> 'ST_Polygon' then
+    raise exception 'Geometry harus berupa Polygon.' using errcode = 'GDE00';
   end if;
 
-  if not st_isvalid(v_2d) then
+  if not st_isvalid(p_new) then
     raise exception
       'Polygon tidak valid: ada garis yang berpotongan (self-intersection). Perbaiki bentuk polygon lalu simpan lagi.'
       using errcode = 'GDE01';
   end if;
 
-  if st_area(v_2d::geography) <= 0 then
-    raise exception 'Luas polygon harus lebih besar dari 0.'
-      using errcode = 'GDE05';
-  end if;
-
   select geometry into v_parent from public.locations where id = p_lokasi_id;
+
   if v_parent is null then
     raise exception
       'Batas lokasi induk belum digambar. Gambar batas lokasi terlebih dahulu sebelum memetakan bidang.'
       using errcode = 'GDE04';
   end if;
 
-  if not (st_covers(v_parent, v_2d) or st_within(v_2d, v_parent)) then
+  if not st_isvalid(v_parent) then
+    raise exception 'Batas lokasi induk tidak valid. Hubungi administrator.'
+      using errcode = 'GDE05';
+  end if;
+
+  if not st_coveredby(p_new, v_parent) then
     raise exception
-      'Polygon bidang harus berada sepenuhnya di dalam batas lokasi.'
+      'Polygon bidang keluar dari batas lokasi. Pastikan seluruh bidang berada di dalam batas induk.'
       using errcode = 'GDE02';
   end if;
 
-  select count(*) into v_overlap_count
+  select p.id, p.kode,
+         st_area(st_intersection(p_new, p.geometry)::geography) as overlap_m2
+  into v_conflict
   from public.land_parcels lp
   where lp.lokasi_id = p_lokasi_id
+    and lp.id is distinct from p_exclude_parcel_id
     and lp.geometry is not null
-    and (p_exclude_parcel_id is null or lp.id <> p_exclude_parcel_id)
-    and st_overlaps(lp.geometry, v_2d);
+    and st_intersects(p_new, lp.geometry)
+    and st_area(st_intersection(p_new, lp.geometry)::geography) > v_tolerance_m2
+  order by 3 desc
+  limit 1;
 
-  if v_overlap_count > 0 then
+  if found then
     raise exception
-      'Polygon bertumpukan (overlap) dengan bidang lain yang sudah ada pada lokasi ini. Sesuaikan batas bidang.'
+      'Polygon bidang overlap dengan bidang % (sekitar % m²). Bidang boleh berbatasan (shared boundary) tetapi tidak boleh bertumpuk.',
+      v_conflict.kode, round(v_conflict.overlap_m2::numeric, 1)
       using errcode = 'GDE03';
   end if;
 end;
