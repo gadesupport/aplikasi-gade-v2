@@ -67,7 +67,7 @@ export default function GisImportModal({
   const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null)
   const [confirmedCrs, setConfirmedCrs] = useState<string>(WGS84)
 
-  const [targetMode, setTargetMode] = useState<TargetMode>('PARCEL')
+  const [targetMode, setTargetMode] = useState<TargetMode>(parentGeometry ? 'PARCEL' : 'PARENT')
   const [referenceKind, setReferenceKind] = useState<ReferenceLayerKind>('JALAN')
   const [mapping, setMapping] = useState<Record<string, GadeField>>({})
   const [fillLuasFromGeometry, setFillLuasFromGeometry] = useState(true)
@@ -604,6 +604,20 @@ export default function GisImportModal({
                     </p>
                   </label>
                 </div>
+
+                {!parentGeometry && targetMode === 'PARCEL' && (
+                  <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-xs text-amber-800 flex items-start gap-3 shadow-xs">
+                    <svg className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    <div>
+                      <p className="font-bold text-sm text-amber-900">Perhatian: Lokasi Ini Belum Memiliki Batas Induk!</p>
+                      <p className="mt-1 text-amber-800">
+                        Aturan validasi spasial PostGIS mewajibkan setiap bidang tanah berada di dalam batas induk lokasi. Jika file ini adalah batas terluar areal lokasi, silakan pilih opsi target <strong>"Batas Induk Lokasi"</strong> di atas.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Reference layer specific options */}
@@ -873,53 +887,94 @@ export default function GisImportModal({
           {/* STEP 5: HASIL IMPORT */}
           {step === 5 && counts && (
             <div className="space-y-5">
-              <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-6 text-center">
-                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 mb-2">
-                  <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                </div>
-                <h3 className="text-lg font-bold text-emerald-900">Import Berhasil Diselesaikan!</h3>
-                <p className="mt-1 text-xs text-emerald-700">
-                  Data spasial telah diproses dan disimpan ke database sesuai aturan validasi.
-                </p>
+              {counts.imported > 0 ? (
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-6 text-center">
+                  <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 mb-2">
+                    <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
+                  <h3 className="text-lg font-bold text-emerald-900">
+                    {counts.imported} Data Berhasil Diimpor!
+                  </h3>
+                  <p className="mt-1 text-xs text-emerald-700">
+                    Data spasial telah disimpan ke database dan siap diterapkan langsung ke peta.
+                  </p>
 
-                <div className="mt-4 flex flex-wrap justify-center gap-3">
-                  <div className="rounded-xl bg-white border border-emerald-200 px-4 py-2 text-center shadow-xs">
-                    <div className="text-xl font-bold text-emerald-600">{counts.imported}</div>
-                    <div className="text-xs uppercase text-slate-500 font-medium">Berhasil Masuk</div>
+                  <div className="mt-4 flex flex-wrap justify-center gap-3">
+                    <div className="rounded-xl bg-white border border-emerald-200 px-4 py-2 text-center shadow-xs">
+                      <div className="text-xl font-bold text-emerald-600">{counts.imported}</div>
+                      <div className="text-xs uppercase text-slate-500 font-medium">Berhasil Masuk</div>
+                    </div>
+                    {counts.skipped > 0 && (
+                      <div className="rounded-xl bg-white border border-slate-200 px-4 py-2 text-center shadow-xs">
+                        <div className="text-xl font-bold text-slate-600">{counts.skipped}</div>
+                        <div className="text-xs uppercase text-slate-500 font-medium">Dilewati</div>
+                      </div>
+                    )}
+                    {counts.invalid > 0 && (
+                      <div className="rounded-xl bg-white border border-red-200 px-4 py-2 text-center shadow-xs">
+                        <div className="text-xl font-bold text-red-600">{counts.invalid}</div>
+                        <div className="text-xs uppercase text-slate-500 font-medium">Invalid Geometri</div>
+                      </div>
+                    )}
+                    {counts.duplicate > 0 && (
+                      <div className="rounded-xl bg-white border border-amber-200 px-4 py-2 text-center shadow-xs">
+                        <div className="text-xl font-bold text-amber-600">{counts.duplicate}</div>
+                        <div className="text-xs uppercase text-slate-500 font-medium">Duplikat Kode</div>
+                      </div>
+                    )}
+                    {counts.reviewRequired.length > 0 && (
+                      <div className="rounded-xl bg-white border border-violet-200 px-4 py-2 text-center shadow-xs">
+                        <div className="text-xl font-bold text-violet-600">{counts.reviewRequired.length}</div>
+                        <div className="text-xs uppercase text-slate-500 font-medium">Perlu Review</div>
+                      </div>
+                    )}
                   </div>
-                  <div className="rounded-xl bg-white border border-slate-200 px-4 py-2 text-center shadow-xs">
-                    <div className="text-xl font-bold text-slate-600">{counts.skipped}</div>
-                    <div className="text-xs uppercase text-slate-500 font-medium">Dilewati</div>
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-amber-300 bg-amber-50/80 p-6 text-center">
+                  <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-amber-600 mb-2">
+                    <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
                   </div>
-                  {counts.invalid > 0 && (
+                  <h3 className="text-lg font-bold text-amber-900">
+                    Tidak Ada Data yang Berhasil Disimpan (0 Berhasil)
+                  </h3>
+                  <p className="mt-1 text-xs text-amber-800 max-w-lg mx-auto">
+                    {!parentGeometry && targetMode === 'PARCEL'
+                      ? 'Penyebab: Lokasi ini belum memiliki batas induk (parent area). PostGIS menolak bidang tanah jika batas lokasi belum dibuat. Silakan ubah target menjadi "Batas Induk Lokasi" terlebih dahulu.'
+                      : 'Data tidak lolos validasi server PostGIS. Silakan periksa rincian penolakan di bawah ini.'}
+                  </p>
+
+                  <div className="mt-4 flex flex-wrap justify-center gap-3">
                     <div className="rounded-xl bg-white border border-red-200 px-4 py-2 text-center shadow-xs">
                       <div className="text-xl font-bold text-red-600">{counts.invalid}</div>
                       <div className="text-xs uppercase text-slate-500 font-medium">Invalid Geometri</div>
                     </div>
-                  )}
-                  {counts.duplicate > 0 && (
-                    <div className="rounded-xl bg-white border border-amber-200 px-4 py-2 text-center shadow-xs">
-                      <div className="text-xl font-bold text-amber-600">{counts.duplicate}</div>
-                      <div className="text-xs uppercase text-slate-500 font-medium">Duplikat Kode</div>
-                    </div>
-                  )}
-                  {counts.reviewRequired.length > 0 && (
-                    <div className="rounded-xl bg-white border border-violet-200 px-4 py-2 text-center shadow-xs">
-                      <div className="text-xl font-bold text-violet-600">{counts.reviewRequired.length}</div>
-                      <div className="text-xs uppercase text-slate-500 font-medium">Perlu Review</div>
-                    </div>
-                  )}
+                    {counts.duplicate > 0 && (
+                      <div className="rounded-xl bg-white border border-amber-200 px-4 py-2 text-center shadow-xs">
+                        <div className="text-xl font-bold text-amber-600">{counts.duplicate}</div>
+                        <div className="text-xs uppercase text-slate-500 font-medium">Duplikat Kode</div>
+                      </div>
+                    )}
+                    {counts.reviewRequired.length > 0 && (
+                      <div className="rounded-xl bg-white border border-violet-200 px-4 py-2 text-center shadow-xs">
+                        <div className="text-xl font-bold text-violet-600">{counts.reviewRequired.length}</div>
+                        <div className="text-xs uppercase text-slate-500 font-medium">Ditolak Server</div>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
+              )}
 
               {counts.reviewRequired.length > 0 && (
                 <div className="rounded-xl border border-violet-200 bg-violet-50 p-4">
                   <h4 className="text-xs font-bold uppercase tracking-wider text-violet-800 mb-2">
-                    Fitur Ditolak Validasi Spasial Server (Overlap / Di Luar Batas):
+                    Rincian Ditolak Validasi Spasial Server:
                   </h4>
-                  <div className="max-h-40 overflow-y-auto space-y-1.5 text-xs text-violet-900">
+                  <div className="max-h-48 overflow-y-auto space-y-1.5 text-xs text-violet-900">
                     {counts.reviewRequired.map((item, idx) => (
                       <div key={idx} className="flex items-start gap-2 border-b border-violet-100 pb-1">
                         <span className="font-mono font-semibold">{item.kode}:</span>
@@ -944,6 +999,15 @@ export default function GisImportModal({
                 className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 transition disabled:opacity-50"
               >
                 ← Kembali
+              </button>
+            )}
+            {step === 5 && counts && counts.imported === 0 && (
+              <button
+                type="button"
+                onClick={() => setStep(3)}
+                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100 transition"
+              >
+                ← Ubah Target / Pengaturan
               </button>
             )}
           </div>
@@ -998,16 +1062,22 @@ export default function GisImportModal({
               </button>
             )}
 
-            {step === 5 && (
+            {step === 5 && counts && (
               <button
                 type="button"
                 onClick={() => {
-                  onSuccess()
+                  if (counts.imported > 0) {
+                    onSuccess()
+                  }
                   onClose()
                 }}
-                className="rounded-lg bg-emerald-600 px-6 py-2 text-sm font-semibold text-white hover:bg-emerald-700 shadow-xs transition"
+                className={`rounded-lg px-6 py-2 text-sm font-semibold text-white shadow-xs transition ${
+                  counts.imported > 0
+                    ? 'bg-emerald-600 hover:bg-emerald-700'
+                    : 'bg-slate-600 hover:bg-slate-700'
+                }`}
               >
-                Terapkan & Perbarui Peta
+                {counts.imported > 0 ? 'Terapkan & Perbarui Peta' : 'Tutup'}
               </button>
             )}
           </div>

@@ -37,8 +37,54 @@ export interface MappedParcel {
   invalidReason: string | null
 }
 
+// Normalisasi geometry: jika Polygon atau MultiPolygon, pastikan ring tertutup
+// dan konversikan ke Polygon tunggal yang valid.
+export function normalizeToPolygon(geometry: Geometry | null | undefined): Polygon | null {
+  if (!geometry) return null
+  if (geometry.type === 'Polygon') {
+    const closed = geometry.coordinates.map((ring) => {
+      if (ring.length < 3) return ring
+      const first = ring[0]
+      const last = ring[ring.length - 1]
+      if (first[0] !== last[0] || first[1] !== last[1]) {
+        return [...ring, [first[0], first[1], ...(first.slice(2) || [])]]
+      }
+      return ring
+    })
+    return { type: 'Polygon', coordinates: closed }
+  }
+  if (geometry.type === 'MultiPolygon') {
+    if (!geometry.coordinates || geometry.coordinates.length === 0) return null
+    let maxArea = -1
+    let bestCoords: import('geojson').Position[][] | null = null
+    for (const part of geometry.coordinates) {
+      const closedPart = part.map((ring) => {
+        if (ring.length < 3) return ring
+        const first = ring[0]
+        const last = ring[ring.length - 1]
+        if (first[0] !== last[0] || first[1] !== last[1]) {
+          return [...ring, [first[0], first[1], ...(first.slice(2) || [])]]
+        }
+        return ring
+      })
+      const testFeature: Feature<Polygon> = {
+        type: 'Feature',
+        properties: {},
+        geometry: { type: 'Polygon', coordinates: closedPart },
+      }
+      const a = area(testFeature)
+      if (a > maxArea || bestCoords === null) {
+        maxArea = a
+        bestCoords = closedPart
+      }
+    }
+    return bestCoords ? { type: 'Polygon', coordinates: bestCoords } : null
+  }
+  return null
+}
+
 // Terapkan field mapping (source field → GADE field, §24) pada feature.
-// Feature yang bukan Polygon atau tidak valid → invalid (tidak diimport).
+// Feature dinormalisasi menjadi Polygon tertutup; jika tidak valid → invalid.
 export function applyFieldMapping(
   features: Feature<Geometry, GeoJsonProperties>[],
   mapping: Record<string, GadeField>,
@@ -62,10 +108,14 @@ export function applyFieldMapping(
       }
     }
 
-    const isPolygon = feature.geometry?.type === 'Polygon'
-    const valid = isPolygon && isFeatureValid(feature)
+    const normalizedPolygon = normalizeToPolygon(feature.geometry)
+    const normalizedFeature: Feature<Geometry, GeoJsonProperties> = normalizedPolygon
+      ? { ...feature, geometry: normalizedPolygon }
+      : feature
+    const isPolygon = Boolean(normalizedPolygon)
+    const valid = isPolygon && isFeatureValid(normalizedFeature)
     let invalidReason: string | null = null
-    if (!isPolygon) invalidReason = 'Geometry bukan Polygon.'
+    if (!isPolygon) invalidReason = 'Geometry bukan Polygon atau MultiPolygon.'
     else if (!valid) invalidReason = 'Geometry tidak valid (ring/self-intersection/koordinat).'
 
     let luas: number | null = null
@@ -73,8 +123,8 @@ export function applyFieldMapping(
       const parsed = Number(mapped.luas.replace(',', '.'))
       luas = Number.isFinite(parsed) && parsed >= 0 ? parsed : null
     }
-    if (luas === null && fillLuasFromGeometry && valid) {
-      luas = Math.round(areaM2(feature) * 100) / 100
+    if (luas === null && fillLuasFromGeometry && valid && normalizedPolygon) {
+      luas = Math.round(areaM2(normalizedFeature) * 100) / 100
     }
 
     const status = toStatus(mapped.status)
@@ -90,7 +140,7 @@ export function applyFieldMapping(
       nomor_hak: mapped.nomor_hak,
       status,
       namaPihak: mapped.nama_pihak,
-      geometry: isPolygon ? (feature.geometry as Polygon) : (null as unknown as Polygon),
+      geometry: (normalizedPolygon ?? null) as unknown as Polygon,
       valid,
       invalidReason,
     }
