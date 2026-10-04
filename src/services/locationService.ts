@@ -1,5 +1,6 @@
 import { isServiceError, ServiceError, toServiceError } from '../lib/errors'
 import { supabase } from '../lib/supabase'
+import { auditService } from './auditService'
 import {
   requireSupabase,
   sanitizeSearchTerm,
@@ -124,9 +125,11 @@ export const locationService = {
   async create(input: LocationInput): Promise<LocationRecord> {
     requireSupabase()
     validateRequiredText(input)
-    return unwrapQuerySingle<LocationRecord>(
+    const row = await unwrapQuerySingle<LocationRecord>(
       supabase.from('locations').insert(mapInputToRow(input)).select(COLUMNS).single(),
     )
+    auditService.log('CREATE', 'LOCATION', row.id, row.kode)
+    return row
   },
 
   async update(id: string, input: Partial<LocationInput>): Promise<LocationRecord> {
@@ -136,9 +139,14 @@ export const locationService = {
       throw new ServiceError('Tidak ada perubahan yang disimpan.')
     }
     validateRequiredText(input)
-    return unwrapQuerySingle<LocationRecord>(
+    const row = await unwrapQuerySingle<LocationRecord>(
       supabase.from('locations').update(patch).eq('id', id).select(COLUMNS).single(),
     )
+    auditService.log('UPDATE', 'LOCATION', row.id, row.kode)
+    if (input.status !== undefined) {
+      auditService.log('STATUS_CHANGE', 'LOCATION', row.id, `${row.kode} → ${row.status}`)
+    }
+    return row
   },
 
   async remove(id: string): Promise<void> {

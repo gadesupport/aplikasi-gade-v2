@@ -34,7 +34,7 @@ cross join lateral (
     base.*,
     case
       when base.luas_parent_m2 is null then null
-      else least(round((base.luas_bidang_netto_m2 / base.luas_parent_m2) * 100, 2), 100)
+      else least(round(((base.luas_bidang_netto_m2 / base.luas_parent_m2) * 100)::numeric, 2), 100)
     end as coverage_percent,
     case
       when base.invalid_geometry then 'GEOMETRY_INVALID'

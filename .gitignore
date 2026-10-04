@@ -5,8 +5,9 @@ node_modules
 dist
 dist-ssr
 *.local
+coverage
 
-# Environment — jangan commit .env / secrets / service_role key
+# Environment — jangan commit .env / credentials / service_role key
 .env
 .env.*
 !.env.example
@@ -24,8 +25,17 @@ pnpm-debug.log*
 !.vscode/extensions.json
 .idea
 .DS_Store
+Thumbs.db
+Desktop.ini
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
+*.tmp
+.tmp-*
+
+# Local helper scripts & notes
+note.txt
+*.bat
+*.ps1

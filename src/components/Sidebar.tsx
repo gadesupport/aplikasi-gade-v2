@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom'
-import { MENU_ITEMS } from '../lib/menu'
+import { MENU_GROUP_ORDER, MENU_ITEMS } from '../lib/menu'
+import { usePermissions } from '../hooks/usePermissions'
 import { cn } from '../lib/cn'
 
 interface SidebarProps {
@@ -8,6 +9,7 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ isOpen, onClose }: SidebarProps) {
+  const { can } = usePermissions()
   return (
     <>
       {isOpen && (
@@ -23,15 +25,20 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
           isOpen ? 'translate-x-0' : '-translate-x-full',
         )}
       >
-        <div className="flex h-16 shrink-0 items-center justify-between border-b border-slate-800 px-5">
-          <div>
-            <p className="text-base font-bold tracking-wide">GADE</p>
-            <p className="text-[11px] text-slate-400">Garda Depan Pertanahan</p>
+        <div className="flex h-16 shrink-0 items-center gap-3 border-b border-slate-800 px-4">
+          <img
+            src="/logo-gade.jpg"
+            alt="Logo GADE"
+            className="h-11 w-11 rounded-lg bg-white object-contain p-0.5"
+          />
+          <div className="min-w-0">
+            <p className="truncate text-sm font-bold tracking-wide">GadeSystem</p>
+            <p className="truncate text-[11px] text-slate-400">Garda Depan Pertanahan</p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-md p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white lg:hidden"
+            className="ml-auto rounded-md p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white lg:hidden"
             aria-label="Tutup menu"
           >
             <svg
@@ -47,24 +54,37 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
           </button>
         </div>
 
-        <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
-          {MENU_ITEMS.map((item) => (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              onClick={onClose}
-              className={({ isActive }) =>
-                cn(
-                  'block rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-                  isActive
-                    ? 'bg-emerald-600 text-white'
-                    : 'text-slate-300 hover:bg-slate-800 hover:text-white',
-                )
-              }
-            >
-              {item.label}
-            </NavLink>
-          ))}
+        <nav className="flex-1 space-y-4 overflow-y-auto px-3 py-4">
+          {MENU_GROUP_ORDER.map((group) => {
+            const items = MENU_ITEMS.filter((item) => item.group === group && can('view', item.path))
+            if (items.length === 0) return null
+            return (
+              <div key={group}>
+                <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+                  {group}
+                </p>
+                <div className="space-y-1">
+                  {items.map((item) => (
+                    <NavLink
+                      key={item.path}
+                      to={item.path}
+                      onClick={onClose}
+                      className={({ isActive }) =>
+                        cn(
+                          'block rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                          isActive
+                            ? 'bg-emerald-600 text-white'
+                            : 'text-slate-300 hover:bg-slate-800 hover:text-white',
+                        )
+                      }
+                    >
+                      {item.label}
+                    </NavLink>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
         </nav>
 
         <div className="shrink-0 border-t border-slate-800 px-5 py-3">

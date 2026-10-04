@@ -48,6 +48,8 @@ export interface MapViewProps {
   overlays?: MapOverlay[]
   className?: string
   onMarkerClick?: (marker: MapMarker) => void
+  // Klik titik kosong pada peta (lat/lng WGS84).
+  onMapClick?: (lat: number, lng: number) => void
   // Akses instance Leaflet untuk kebutuhan modul Peta nanti (mis. L.map.pm).
   onReady?: (map: LeafletMap) => void
 }
@@ -64,6 +66,7 @@ export default function MapView({
   overlays = [],
   className,
   onMarkerClick,
+  onMapClick,
   onReady,
 }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -72,10 +75,15 @@ export default function MapView({
   const geojsonLayerRef = useRef<L.GeoJSON | null>(null)
   const overlayLayersRef = useRef<L.GeoJSON[]>([])
   const markerClickRef = useRef(onMarkerClick)
+  const mapClickRef = useRef(onMapClick)
   const readyRef = useRef(onReady)
 
   useEffect(() => {
     markerClickRef.current = onMarkerClick
+  })
+
+  useEffect(() => {
+    mapClickRef.current = onMapClick
   })
 
   useEffect(() => {
@@ -91,6 +99,9 @@ export default function MapView({
         '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     }).addTo(map)
     markerLayerRef.current = L.layerGroup().addTo(map)
+    map.on('click', (event: L.LeafletMouseEvent) => {
+      mapClickRef.current?.(event.latlng.lat, event.latlng.lng)
+    })
     mapRef.current = map
     readyRef.current?.(map)
 
