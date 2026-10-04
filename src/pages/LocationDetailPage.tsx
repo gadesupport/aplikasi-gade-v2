@@ -1,8 +1,11 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import AcquisitionRecapSection from '../components/AcquisitionRecapSection'
 import LocationGeometrySection from '../components/LocationGeometrySection'
 import ParcelStatusBadge from '../components/ParcelStatusBadge'
+import DiscussionHistorySection from '../components/DiscussionHistorySection'
+import SurveyHistorySection from '../components/SurveyHistorySection'
 import StatusBadge from '../components/StatusBadge'
 import { useLocationDetail } from '../hooks/useLocations'
 import { useParcelsByLocation } from '../hooks/useParcels'
@@ -26,6 +29,7 @@ export default function LocationDetailPage() {
     parcels,
     isLoading: parcelsLoading,
     error: parcelsError,
+    reload: reloadParcels,
   } = useParcelsByLocation(location?.id)
   const [isDeleting, setIsDeleting] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -137,7 +141,26 @@ export default function LocationDetailPage() {
         </dl>
       </div>
 
-      <LocationGeometrySection locationId={location.id} />
+      <LocationGeometrySection
+        locationId={location.id}
+        locationKode={location.kode}
+        locationNama={location.nama}
+        onImportSuccess={reloadParcels}
+      />
+
+      <AcquisitionRecapSection locationId={location.id} />
+
+      <DiscussionHistorySection
+        locationId={location.id}
+        newDiscussionHref={`/pembahasan/baru?lokasi=${location.id}`}
+        emptyText={`Catat pembahasan pertama untuk lokasi ${location.kode}.`}
+      />
+
+      <SurveyHistorySection
+        locationId={location.id}
+        newSurveyHref={`/survey/baru?lokasi=${location.id}`}
+        emptyText={`Catat hasil survey pertama untuk lokasi ${location.kode}.`}
+      />
 
       <div className="rounded-xl border border-slate-200 bg-white">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-6 py-4">

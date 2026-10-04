@@ -117,11 +117,17 @@ interface ByLocationState {
   parcels: ParcelWithLocation[]
   isLoading: boolean
   error: string | null
+  reload: () => void
 }
 
 // Daftar bidang milik satu lokasi — dipakai di halaman detail lokasi.
 export function useParcelsByLocation(locationId: string | undefined): ByLocationState {
-  const [state, setState] = useState<ByLocationState>({
+  const [reloadCount, setReloadCount] = useState(0)
+  const [state, setState] = useState<{
+    parcels: ParcelWithLocation[]
+    isLoading: boolean
+    error: string | null
+  }>({
     parcels: [],
     isLoading: Boolean(locationId),
     error: null,
@@ -151,7 +157,9 @@ export function useParcelsByLocation(locationId: string | undefined): ByLocation
     return () => {
       active = false
     }
-  }, [locationId])
+  }, [locationId, reloadCount])
 
-  return state
+  const reload = () => setReloadCount((count) => count + 1)
+
+  return { ...state, reload }
 }

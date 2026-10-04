@@ -33,7 +33,7 @@ begin
     update public.land_parcels set geometry = null where id = p_parcel_id;
     if not found then
       raise exception 'Bidang tanah tidak ditemukan.'
-        using errcode = 'PGRST116';
+        using errcode = 'P0002';
     end if;
     return;
   end if;
@@ -63,7 +63,7 @@ begin
 
   if v_lokasi_id is null then
     raise exception 'Bidang tanah tidak ditemukan.'
-      using errcode = 'PGRST116';
+      using errcode = 'P0002';
   end if;
 
   select geometry into v_parent
@@ -115,7 +115,7 @@ begin
 
   if not found then
     raise exception 'Bidang tanah tidak ditemukan.'
-      using errcode = 'PGRST116';
+      using errcode = 'P0002';
   end if;
 end;
 $$;

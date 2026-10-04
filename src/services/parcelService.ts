@@ -1,6 +1,7 @@
 import { isServiceError, ServiceError, toServiceError } from '../lib/errors'
 import { supabase } from '../lib/supabase'
 import { requireSupabase, sanitizeSearchTerm, unwrapQuery, unwrapQuerySingle, unwrapQueryWithCount } from './query'
+import { auditService } from './auditService'
 import type { Paginated } from '../types/pagination'
 import type { ParcelInput, ParcelStatus, ParcelWithLocation } from '../types/parcel'
 import type { ParcelLocationRef } from '../types/parcel'
@@ -23,6 +24,13 @@ function toParcel(row: ParcelRow): ParcelWithLocation {
 
 const SORT_FIELDS = ['kode', 'luas', 'tanggal_kesepakatan', 'created_at', 'updated_at'] as const
 export type ParcelSortField = (typeof SORT_FIELDS)[number]
+
+export interface ParcelOption {
+  id: string
+  kode: string
+  nomor_bidang: string | null
+  lokasi: ParcelLocationRef | null
+}
 
 export interface ParcelListParams {
   // Mencari di kolom kode, nomor_bidang, nomor_hak.
@@ -109,6 +117,32 @@ export const parcelService = {
     return rows.map(toParcel)
   },
 
+  // Opsi bidang (ringkas, dengan referensi lokasi) untuk dropdown form survey.
+  async listOptions(): Promise<ParcelOption[]> {
+    requireSupabase()
+    // Select minim — barisnya bukan ParcelRow penuh.
+    interface ParcelOptionRow {
+      id: string
+      kode: string
+      nomor_bidang: string | null
+      lokasi: ParcelLocationRef | ParcelLocationRef[] | null
+    }
+    const rows =
+      (await unwrapQuery<ParcelOptionRow[]>(
+        supabase
+          .from('land_parcels')
+          .select('id, kode, nomor_bidang, lokasi:locations(id, kode, nama)')
+          .order('kode', { ascending: true })
+          .limit(500),
+      )) ?? []
+    return rows.map((row) => ({
+      id: row.id,
+      kode: row.kode,
+      nomor_bidang: row.nomor_bidang,
+      lokasi: Array.isArray(row.lokasi) ? (row.lokasi[0] ?? null) : row.lokasi,
+    }))
+  },
+
   async getById(id: string): Promise<ParcelWithLocation> {
     requireSupabase()
     try {
@@ -130,10 +164,15 @@ export const parcelService = {
   async create(input: ParcelInput): Promise<ParcelWithLocation> {
     requireSupabase()
     validateRequired(input)
-    const row = await unwrapQuerySingle<ParcelRow>(
+    const created = await unwrapQuerySingle<ParcelRow>(
       supabase.from('land_parcels').insert(mapInputToRow(input)).select(COLUMNS).single(),
     )
-    return toParcel(row)
+    const row = toParcel(created)
+    auditService.log('CREATE', 'LAND_PARCEL', row.id, row.kode)
+    if (input.status_pembebasan !== undefined) {
+      auditService.log('STATUS_CHANGE', 'LAND_PARCEL', row.id, row.kode + ' -> ' + row.status_pembebasan)
+    }
+    return row
   },
 
   async update(id: string, input: Partial<ParcelInput>): Promise<ParcelWithLocation> {
@@ -143,10 +182,13 @@ export const parcelService = {
       throw new ServiceError('Tidak ada perubahan yang disimpan.')
     }
     validateRequired(input)
-    const row = await unwrapQuerySingle<ParcelRow>(
+    const created = await unwrapQuerySingle<ParcelRow>(
       supabase.from('land_parcels').update(patch).eq('id', id).select(COLUMNS).single(),
     )
-    return toParcel(row)
+    const row = toParcel(created)
+    auditService.log('UPDATE', 'LAND_PARCEL', row.id, row.kode)
+    if (input.status_pembebasan !== undefined) auditService.log('STATUS_CHANGE', 'LAND_PARCEL', row.id, row.kode + ' -> ' + row.status_pembebasan)
+    return row
   },
 
   async remove(id: string): Promise<void> {
@@ -161,5 +203,6 @@ export const parcelService = {
         { code: 'DELETE_FORBIDDEN' },
       )
     }
+    auditService.log('DELETE', 'LAND_PARCEL', id)
   },
 }

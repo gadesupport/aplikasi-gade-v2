@@ -2,6 +2,7 @@ import type { AuthError, User } from '@supabase/supabase-js'
 import { ServiceError } from '../lib/errors'
 import { isSupabaseConfigured } from '../lib/env'
 import { supabase } from '../lib/supabase'
+import { auditService } from './auditService'
 import { requireSupabase, unwrapQuery } from './query'
 import type { AuthUser, Profile, SignInCredentials, UserRole } from '../types/auth'
 
@@ -78,12 +79,14 @@ export const authService = {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) throw toAuthError(error)
     if (!data.user) throw new ServiceError('Login gagal: pengguna tidak ditemukan.')
+    auditService.log('LOGIN', 'AUTH', data.user.id, `Login: ${data.user.email}`)
     const profile = await loadProfile(data.user)
     return mapUser(data.user, profile)
   },
 
   async signOut(): Promise<void> {
     if (!isSupabaseConfigured) return
+    auditService.log('LOGOUT', 'AUTH')
     const { error } = await supabase.auth.signOut()
     if (error) throw toAuthError(error)
   },

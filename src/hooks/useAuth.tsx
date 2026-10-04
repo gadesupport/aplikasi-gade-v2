@@ -8,6 +8,8 @@ interface AuthContextValue {
   isLoading: boolean
   signIn: (credentials: SignInCredentials) => Promise<void>
   signOut: () => Promise<void>
+  // Muat ulang profil dari database (mis. setelah ubah nama di Pengaturan).
+  refreshUser: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -53,6 +55,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signOut: async () => {
         await authService.signOut()
         setUser(null)
+      },
+      refreshUser: async () => {
+        const current = await authService.getCurrentUser()
+        setUser(current)
       },
     }),
     [user, isLoading],

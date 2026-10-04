@@ -2,105 +2,155 @@
 
 Aplikasi web internal Tim Gade untuk mengelola survey lokasi, pembahasan, bidang tanah, pihak/pemilik, legalitas, proses pembebasan, project, arsip, dokumen digital, serah terima, monitoring, laporan, audit, dan peta/GIS pertanahan.
 
-Lihat `AGENTS.md` untuk spesifikasi lengkap.
+Spesifikasi lengkap: [`AGENTS.md`](AGENTS.md).
 
-## Stack
+## Tech Stack
 
-- **Frontend:** React + TypeScript + Vite + Tailwind CSS + React Router
-- **Peta:** Leaflet + Leaflet-Geoman (free) — komponen reusable `src/components/MapView.tsx` (tampil, zoom, pan, marker, GeoJSON layer; basemap OpenStreetMap). Toolbar editing belum diaktifkan — menyusul di modul Peta (AGENTS.md §17).
-- **Backend/Data:** Supabase (Auth, PostgreSQL + PostGIS, Storage) — diakses hanya melalui service layer
+| Lapisan | Teknologi |
+| --- | --- |
+| Frontend | React 19 · TypeScript · Vite · Tailwind CSS 4 · React Router 7 |
+| Peta | Leaflet + Leaflet-Geoman · proj4 · turf |
+| Backend | Supabase (Auth · PostgreSQL + PostGIS · Storage) |
+| Deployment | Netlify |
 
-## Menjalankan Development
+## Prasyarat
+
+- Node.js 20+ (di mesin development ini tersedia portable di `C:\Users\USER\nodejs\...`)
+- Akun Supabase (paket gratis memadai)
+
+## Instalasi
 
 ```bash
 npm install
-copy .env.example .env   # isi VITE_SUPABASE_URL dan VITE_SUPABASE_ANON_KEY
-npm run dev
+copy .env.example .env   # lalu isi — lihat bagian Environment
 ```
 
-Tanpa `.env`, aplikasi tetap berjalan dan halaman login menampilkan peringatan bahwa Supabase belum dikonfigurasi.
+## Development
 
-## Script
+```bash
+npm run dev        # buka http://localhost:5173
+```
 
 | Script | Fungsi |
 | --- | --- |
-| `npm run dev` | Development server (Vite) |
+| `npm run dev` | Development server |
 | `npm run build` | Typecheck (`tsc --noEmit`) + production build |
 | `npm run typecheck` | Cek TypeScript saja |
 | `npm run preview` | Preview hasil build |
 
-## Struktur Folder
+## Environment Variables
+
+Semua variabel berawalan `VITE_` **ikut terkirim ke browser** — hanya anon key yang boleh di sini. `service_role key` **dilarang keras** ada di frontend.
+
+Salin `.env.example` → `.env`, isi dari dashboard Supabase (**Project Settings → API Data**):
+
+```
+VITE_SUPABASE_URL=https://<project-ref>.supabase.co
+VITE_SUPABASE_ANON_KEY=<anon-public-key>
+```
+
+> Catatan: isi URL **basis** (tanpa `/rest/v1/`). Tanpa `.env`, aplikasi tetap berjalan dan halaman login menampilkan peringatan.
+
+## Supabase Setup
+
+1. **Buat proyek** di [supabase.com](https://supabase.com), salin URL + anon key ke `.env`.
+2. **Jalankan migration** berurutan (Dashboard → SQL Editor, atau `supabase db push`):
+
+   | # | File | Isi |
+   | --- | --- | --- |
+   | 0 | `20260917000000_create_profiles.sql` | profiles + trigger user pertama=SUPERADMIN + RLS |
+   | 1 | `20260917000001_create_locations.sql` | locations + PostGIS + RLS |
+   | 2 | `20260917000002_create_land_parcels.sql` | land_parcels (locations 1:N) |
+   | 3 | `20260917000003_create_parties.sql` | parties + parcel_parties (N:N) |
+   | 4 | `20260917000004_create_legalities.sql` | legalities per bidang |
+   | 5 | `20260917000005_gis_geometry.sql` | SRID/GIST/validitas geometry |
+   | 6 | `20260917000006_parcel_spatial_validation.sql` | RPC `save_parcel_geometry` |
+   | 7 | `20260917000007_location_area_stats.sql` | view statistik pemetaan |
+   | 8 | `20260917000008_nearest_search.sql` | RPC pencarian terdekat |
+   | 9 | `20260917000009_create_surveys.sql` | surveys (lokasi/bidang) |
+   | 10 | `20260917000010_create_acquisitions.sql` | pembebasan + rekap per lokasi |
+   | 11 | `20260917000011_create_projects.sql` | projects (kode PRJ-YYYY-NNN) |
+   | 12 | `20260917000012_create_archives.sql` | arsip + aturan relasi §12 |
+   | 13 | `20260917000013_create_archive_documents.sql` | bucket privat + dokumen digital |
+   | 14 | `20260917000014_create_handovers.sql` | serah terima + RPC atomik |
+   | 15 | `20260917000015_validate_parcel_geometry.sql` | validasi tanpa insert |
+   | 16 | `20260917000016_gis_field_templates.sql` | template field mapping |
+   | 17 | `20260917000017_reference_layers.sql` | reference layer (§18) |
+   | 18 | `20260917000018_dashboard_stats.sql` | RPC statistik dashboard |
+   | 19 | `20260917000019_create_audit_logs.sql` | audit log append-only |
+   | 20 | `20260917000020_geometry_access_hardening.sql` | geometry hanya via RPC |
+   | 21 | `20260917000021_create_discussions.sql` | pembahasan lokasi & bidang + RPC keputusan |
+   | 22 | `20260917000022_role_permissions.sql` | matriks izin role × menu (menu Pengaturan) |
+
+3. **Verifikasi** (opsional, read-only + ROLLBACK): `verify_gis.sql`, `verify_parcel_validation.sql`, `verify_area_stats.sql`, `verify_nearest.sql` di `supabase/`.
+   Untuk kemudahan, seluruh 23 migrasi terangkum dalam `supabase/apply_all.sql`.
+4. **Buat user pertama** — Authentication → Users → Add user. Trigger membuat profilnya otomatis; **user pertama = SUPERADMIN**, berikutnya ADMIN.
+5. **Keamanan**: matikan **public signup** (Authentication → Providers → Email → Disable sign up) karena aplikasi internal; ubah role user hanya via SQL editor/SUPERADMIN.
+
+## GIS Setup
+
+- **Peta**: basemap OpenStreetMap; editor polygon induk lokasi & bidang (draw, edit vertex, drag, snapping, save/cancel) di halaman detail masing-masing.
+- **Impor** (`/peta/impor`): GeoJSON · KML · Shapefile ZIP · DXF → pipeline UPLOAD → ANALYZE → SELECT LAYER → DETECT/CONFIRM CRS → FIELD MAPPING (dengan template tersimpan) → PREVIEW → VALIDATE → IMPORT. Target: Parent Area / Land Parcel / Reference Layer. **Tidak ada insert sebelum validasi** — spatial validation PostGIS (`ST_IsValid`, inside parent, tanpa overlap) dijalankan server-side per fitur.
+- **Ekspor** (`/peta/ekspor`): GeoJSON · KML · SHP ZIP (.shp/.shx/.dbf/.prj) · DXF (layer GADE_PARENT/GADE_PARCEL/GADE_BOUNDARY/GADE_POINT/GADE_LABEL). Cakupan: semua / lokasi / bidang / terpilih / filter.
+- **SRID konsisten 4326 (WGS84)**; semua kolom `geometry(Polygon, 4326)` + index GIST.
+
+## Build & Deployment (Netlify)
+
+```bash
+npm run build      # output: dist/
+npm run preview    # uji hasil build lokal
+```
+
+- `netlify.toml` sudah mengatur build command, publish dir `dist`, dan SPA redirect.
+- Set environment variable `VITE_SUPABASE_URL` & `VITE_SUPABASE_ANON_KEY` di Netlify (Site settings → Environment variables).
+- Import/ekspor GIS dan dokumen digital dimuat lazy (code-split otomatis).
+
+## Keamanan
+
+- Password sepenuhnya **Supabase Auth** — tidak ada password system sendiri.
+- `service_role key` tidak pernah ada di frontend; anon key diproteksi RLS di database.
+- RLS aktif di semua tabel; delete data master hanya ADMIN/SUPERADMIN; audit log hanya SUPERADMIN.
+- Validasi berlapis: form/service → CHECK database → storage policy → spatial validation PostGIS.
+- Audit log append-only (12 jenis aksi §16) — tidak dapat diubah/dihapus via API.
+- Gunakan `.env.example` hanya sebagai template — **jangan pernah mengisi nilai asli ke dalamnya**.
+
+## Struktur Proyek
 
 ```
 src/
-  components/   # Komponen UI reusable (layout, sidebar, header, placeholder)
-  pages/        # Halaman per route
-  services/     # Service layer — semua akses Supabase lewat sini
-  hooks/        # Custom hooks (auth, dll.)
-  lib/          # Klien Supabase, env config, error handling, helper
+  components/   # UI reusable (MapView, PolygonEditor, section per modul, badge)
+  pages/        # Halaman per route (list/detail/form tiap modul)
+  services/     # Service layer — satu-satunya jalur ke Supabase
+  hooks/        # Custom hooks (auth, data per modul, geolocation)
+  lib/          # Supabase client, env, errors, CSV, GIS engine
   types/        # Tipe TypeScript bersama
 supabase/
-  migrations/   # SQL migration (profiles, RLS, trigger)
+  migrations/   # 23 migration SQL berurutan (000000 - 000022)
+  apply_all.sql # Bundle seluruh migrasi siap dieksekusi di SQL Editor
+  verify_*.sql  # Skrip verifikasi pasca-migration
 ```
 
-## Supabase Auth & Database
+Aturan arsitektur (AGENTS.md §3): `UI → Component/Hook → Service Layer → Supabase → PostgreSQL/Storage` — query Supabase tidak boleh ditulis langsung di component.
 
-Autentikasi sepenuhnya oleh **Supabase Auth** (email + password) — tidak ada password system sendiri. Frontend hanya menyimpan sesi yang diberikan Supabase.
+## Status Modul
 
-### Menerapkan migrasi
-
-File migration ada di `supabase/migrations/`, dijalankan sekali berurutan:
-
-1. **Supabase Dashboard** → SQL Editor → salin isi file migration → Run, atau
-2. **Supabase CLI**: `supabase link --project-ref <ref>` lalu `supabase db push`.
-
-`20260917000000_create_profiles.sql` membuat:
-
-- Tabel `public.profiles`: `id` (FK ke `auth.users`), `nama`, `role`, `created_at`, `updated_at` (otomatis via trigger)
-- Trigger pembuatan profil otomatis setiap user baru dibuat — **user pertama = SUPERADMIN**, berikutnya = ADMIN
-- **RLS**: baca hanya untuk user terautentikasi; update baris sendiri; update semua baris khusus SUPERADMIN
-- Guard: hanya SUPERADMIN yang boleh mengubah `role` via REST API (cegah eskalasi role); akses admin (SQL editor / service_role) tetap lolos
-
-### User pertama & login
-
-1. Isi `.env` (URL + anon key), restart dev server.
-2. Terapkan migration di atas.
-3. Dashboard Supabase → Authentication → Users → **Add user** (email + password).
-4. Trigger otomatis membuat profilnya; user pertama mendapat role SUPERADMIN.
-5. Login lewat halaman `/login` aplikasi.
-
-Mengubah role user lain: dari SQL editor (`update public.profiles set role = 'LEGAL' where id = '...'`) atau modul manajemen pengguna yang akan dibuat nanti.
-
-### GIS (PostGIS)
-
-- Migration `20260917000001` mengaktifkan ekstensi `postgis` (schema `extensions`); `20260917000005_gis_geometry.sql` memastikan ulang secara idempotent.
-- `locations.geometry` dan `land_parcels.geometry`: `geometry(Polygon, 4326)` — **SRID 4326 (WGS84) konsisten** di semua kolom geometry (standar KML, OpenStreetMap, native Leaflet). SRID ditegakkan oleh tipe kolom; polygon editor menyusul di modul Peta (§17).
-- Spatial index **GIST** di kedua tabel; CHECK `st_isvalid` menolak polygon invalid (self-intersecting) di level database.
-- Setelah migration dijalankan, jalankan `supabase/verify_gis.sql` di SQL Editor untuk memverifikasi (read-only + uji tulis yang diakhiri ROLLBACK). PostGIS juga bisa diaktifkan manual via Dashboard → Database → Extensions → postgis.
-
-### Editor Batas Lokasi (polygon induk)
-
-Halaman detail lokasi memiliki section peta: mode **view** menampilkan batas induk sebagai outline hijau + seluruh bidang pada lokasi (biru); tombol **Gambar/Edit Batas** membuka editor Leaflet-Geoman dengan draw polygon, edit vertex (tambah/hapus/pindah), geser polygon, snapping (vertex/edge ke batas sendiri & batas lokasi lain, snap distance dapat diatur), Simpan, dan Batal. Validasi self-intersection dijaga bersama oleh Geoman (`allowSelfIntersection: false`), service (`mapService`), dan CHECK `ST_IsValid` di database.
-
-### Polygon Bidang & Validasi Spatial Server-Side
-
-Halaman detail bidang memiliki section peta serupa: view menampilkan batas induk (outline) + semua bidang lokasi dengan bidang aktif di-highlight; editor `PolygonEditor` (generik, dipakai juga lokasi) mendukung draw/vertex/drag/clear + snapping ke **batas induk**, **vertex/edge bidang lain**, dan endpoint.
-
-Penyimpanan polygon bidang **wajib** lewat RPC `save_parcel_geometry(parcel_id, geojson)` (migration `20260917000006_parcel_spatial_validation.sql`) yang memvalidasi secara atomik server-side: `ST_IsValid`/anti self-intersection (GDE01), berada di dalam parent via `ST_CoveredBy` (GDE02; batas induk belum ada → GDE04), dan **tidak overlap** dengan bidang lain (GDE03) — shared boundary diperbolehkan (toleransi luas intersection ≤ 0,01 m²). Gagal validasi → transaksi dibatalkan, tidak tersimpan, dan pesan error berbahasa Indonesia langsung tampil di editor. RPC berjalan sebagai invoker sehingga RLS tetap berlaku. Verifikasi: `supabase/verify_parcel_validation.sql` (7 skenario, diakhiri ROLLBACK).
-
-### Statistik Pemetaan (§17.6)
-
-View `location_area_stats` (migration `20260917000007_location_area_stats.sql`, `security_invoker` + RLS tabel dasar) menghitung per lokasi dengan PostGIS saat dibaca: **luas parent**, **total luas bidang** (netto = `ST_Union`, bruto = Σ per bidang), **sisa luas**, dan **persentase coverage**, plus status `TERPETAK_PENUH` (sisa ≤ 1 m²) / `BELUM_PENUH` / `OVERLAP` (bruto > netto + 0,01 m²) / `GEOMETRY_INVALID`. Panel "Pemetaan Area" di halaman detail lokasi menampilkan semuanya (termasuk peringatan detail saat OVERLAP/GEOMETRY_INVALID). Verifikasi: `supabase/verify_area_stats.sql` (4 skenario, ROLLBACK).
-
-Aturan arsitektur (AGENTS.md §3): `UI → Component/Hook → Service Layer → Supabase → PostgreSQL/Storage`. Query Supabase tidak boleh ditulis langsung di component; business logic tidak boleh bercampur dengan UI.
-
-## Deployment (Netlify)
-
-- Build command `npm run build`, publish directory `dist` (lihat `netlify.toml`).
-- SPA routing tetap berjalan setelah refresh (redirect sudah diatur di `netlify.toml`).
-- Set environment variable `VITE_SUPABASE_URL` dan `VITE_SUPABASE_ANON_KEY` di dashboard Netlify.
-- Jangan pernah menyimpan `service_role key`, credentials, atau secrets di frontend atau di Git (`Jangan commit .env` — lihat `.gitignore`).
-
-## Status
-
-Kerangka aplikasi: routing + protected routes, layout (sidebar + header), Supabase Auth (login/logout/session), profiles + RLS, **modul Lokasi**, **modul Bidang Tanah** (`land_parcels`), **modul Pihak** (`parties` + relasi N:N `parcel_parties`), dan **modul Legalitas** (`legalities` per bidang — checklist 14 jenis dokumen standar dengan persentase kelengkapan; migration `20260917000004_create_legalities.sql`; persentase = Ada ÷ (total − Tidak Relevan)). Kolom geometry tersedia di DB; polygon editor menyusul pada modul Peta (AGENTS.md §17). Modul bisnis lain (survey, pembahasan, pembebasan, dst.) belum dibuat.
+**Selesai**:
+- Auth + profiles (role-based: SUPERADMIN, ADMIN, SURVEYOR, LEGAL)
+- Lokasi (analisis & batas polygon induk)
+- Bidang Tanah (polygon anak + relasi 1:N lokasi)
+- Pihak / Pemilik (relasi N:N via parcel_parties)
+- Legalitas (checklist, jenis dokumen, persentase kelengkapan)
+- Survey (lokasi & bidang + GPS browser Geolocation)
+- Pembahasan (keputusan LAYAK/PERLU_KAJIAN/TIDAK_LAYAK + trigger efek status otomatis)
+- Pembebasan (transaksi, uang muka, pelunasan, rekap per lokasi)
+- Project (kode PRJ-YYYY-NNN)
+- Arsip (fisik: gudang, rak, box, folder + 4 relasi: LOCATION, PARCEL, PROJECT, GENERAL)
+- Dokumen Digital (Supabase Storage private bucket)
+- Serah Terima (berkas masuk/keluar/kembali + cetak PDF tanda terima)
+- Peta GIS (Leaflet + Geoman, vertex editing, snapping, spatial validation, pencarian, nearby)
+- Impor GIS (GeoJSON, KML, SHP ZIP, DXF + CRS detection + field mapping + preview + validation)
+- Ekspor GIS (GeoJSON, KML, SHP ZIP, DXF)
+- Dashboard (ringkasan status master, luas, GIS, arsip)
+- Laporan (monitoring progres pembebasan, export CSV)
+- Audit Log (append-only 12 jenis aksi, filter entitas & aksi)
+- Pengaturan (profil pengguna, manajemen role SUPERADMIN, health check koneksi Supabase, matriks role permissions)

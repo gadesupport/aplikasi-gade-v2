@@ -1,8 +1,10 @@
 import { ServiceError, toServiceError } from '../lib/errors'
 import { supabase } from '../lib/supabase'
 import { requireSupabase, unwrapQuery } from './query'
+import { auditService } from './auditService'
 import type { Feature, FeatureCollection, Polygon } from 'geojson'
 import type { LocationAreaStats } from '../types/areaStats'
+import type { NearestLocation, NearestParcel } from '../types/map'
 
 // Batas lokasi lain yang dimuat sebagai snapping guide saat editing.
 const GUIDE_LIMIT = 200
@@ -59,6 +61,7 @@ export const mapService = {
     if (!data || data.length === 0) {
       throw new ServiceError('Lokasi tidak ditemukan.', { code: 'LOCATION_NOT_FOUND' })
     }
+    auditService.log('GEOMETRY_CHANGE', 'LOCATION', locationId, polygon ? 'Simpan batas induk' : 'Hapus batas induk')
   },
 
   // Batas lokasi lain (exclude lokasi aktif) sebagai FeatureCollection
@@ -104,6 +107,7 @@ export const mapService = {
       p_geojson: polygon,
     })
     if (error) throw toServiceError(error)
+    auditService.log('GEOMETRY_CHANGE', 'LAND_PARCEL', parcelId, polygon ? 'Simpan polygon bidang' : 'Hapus polygon bidang')
   },
 
   // Statistik pemetaan satu lokasi (luas parent/bidang, sisa, coverage,
@@ -112,6 +116,26 @@ export const mapService = {
     requireSupabase()
     return unwrapQuery<LocationAreaStats | null>(
       supabase.from('location_area_stats').select('*').eq('location_id', locationId).maybeSingle(),
+    )
+  },
+
+  // ===== Pencarian terdekat (§17.7) — RPC PostGIS, jarak meter =====
+
+  async findNearestParcels(lat: number, lng: number, limit = 5): Promise<NearestParcel[]> {
+    requireSupabase()
+    return (
+      (await unwrapQuery<NearestParcel[]>(
+        supabase.rpc('find_nearest_parcels', { p_lat: lat, p_lng: lng, p_limit: limit }),
+      )) ?? []
+    )
+  },
+
+  async findNearestLocations(lat: number, lng: number, limit = 5): Promise<NearestLocation[]> {
+    requireSupabase()
+    return (
+      (await unwrapQuery<NearestLocation[]>(
+        supabase.rpc('find_nearest_locations', { p_lat: lat, p_lng: lng, p_limit: limit }),
+      )) ?? []
     )
   },
 

@@ -1,6 +1,7 @@
 import { isServiceError, ServiceError, toServiceError } from '../lib/errors'
 import { supabase } from '../lib/supabase'
 import { requireSupabase, sanitizeSearchTerm, unwrapQuery, unwrapQuerySingle, unwrapQueryWithCount } from './query'
+import { auditService } from './auditService'
 import type { Paginated } from '../types/pagination'
 import type {
   ParcelPartyInput,
@@ -110,9 +111,11 @@ export const partyService = {
     requireSupabase()
     validatePartyInput(input)
     try {
-      return await unwrapQuerySingle<PartyRecord>(
+      const row = await unwrapQuerySingle<PartyRecord>(
         supabase.from('parties').insert(mapPartyInputToRow(input)).select(PARTY_COLUMNS).single(),
       )
+      auditService.log('CREATE', 'PARTY', row.id, row.nama)
+      return row
     } catch (error) {
       rethrowDuplicateNik(error)
     }
@@ -126,9 +129,11 @@ export const partyService = {
     }
     validatePartyInput(input)
     try {
-      return await unwrapQuerySingle<PartyRecord>(
+      const row = await unwrapQuerySingle<PartyRecord>(
         supabase.from('parties').update(patch).eq('id', id).select(PARTY_COLUMNS).single(),
       )
+      auditService.log('UPDATE', 'PARTY', row.id, row.nama)
+      return row
     } catch (error) {
       rethrowDuplicateNik(error)
     }
@@ -145,6 +150,7 @@ export const partyService = {
         code: 'DELETE_FORBIDDEN',
       })
     }
+    auditService.log('DELETE', 'PARTY', id)
   },
 
   // Opsi pihak (ringkas) untuk dropdown penautan legalitas/pihak.
@@ -190,7 +196,9 @@ export const partyService = {
       const created = await unwrapQuerySingle<ParcelPartyRow>(
         supabase.from('parcel_parties').insert(row).select(RELATION_COLUMNS).single(),
       )
-      return toRelation(created)
+      const relation = toRelation(created)
+      auditService.log('CREATE', 'PARCEL_PARTY', relation.id, relation.peran ?? undefined)
+      return relation
     } catch (error) {
       if (isServiceError(error) && error.code === '23505') {
         throw new ServiceError('Pihak ini sudah terhubung dengan bidang tersebut.', {
@@ -211,15 +219,17 @@ export const partyService = {
       peran: input.peran?.trim() || null,
       keterangan: input.keterangan?.trim() || null,
     }
-    const updated = await unwrapQuerySingle<ParcelPartyRow>(
+    const row = toRelation(await unwrapQuerySingle<ParcelPartyRow>(
       supabase.from('parcel_parties').update(patch).eq('id', id).select(RELATION_COLUMNS).single(),
-    )
-    return toRelation(updated)
+    ))
+    auditService.log('UPDATE', 'PARCEL_PARTY', row.id)
+    return row
   },
 
   // Hapus relasi pihak–bidang (data master pihak tetap ada).
   async removeParcelParty(id: string): Promise<void> {
     requireSupabase()
+    auditService.log('DELETE', 'PARCEL_PARTY', id)
     const { data, error } = await supabase
       .from('parcel_parties')
       .delete()

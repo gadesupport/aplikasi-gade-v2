@@ -36,3 +36,16 @@ export function formatDate(value: string | null | undefined): string {
 export function formatRupiah(value: number | null | undefined): string {
   return value === null || value === undefined ? '—' : rupiahFormatter.format(value)
 }
+
+export function formatDistance(meters: number | null | undefined): string {
+  if (meters === null || meters === undefined || !Number.isFinite(meters)) return '—'
+  if (meters < 1000) return `${numberFormatter.format(Math.round(meters))} m`
+  return `${numberFormatter.format(Math.round(meters / 100) / 10)} km`
+}
+
+export function formatFileSize(bytes: number | null | undefined): string {
+  if (bytes === null || bytes === undefined || !Number.isFinite(bytes)) return '—'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${numberFormatter.format(Math.round(bytes / 1024))} KB`
+  return `${numberFormatter.format(Math.round(bytes / (1024 * 1024) * 10) / 10)} MB`
+}

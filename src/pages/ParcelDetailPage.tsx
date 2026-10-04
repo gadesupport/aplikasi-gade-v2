@@ -1,9 +1,12 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import AcquisitionsSection from '../components/AcquisitionsSection'
 import LegalitiesSection from '../components/LegalitiesSection'
 import ParcelGeometrySection from '../components/ParcelGeometrySection'
 import ParcelPartiesSection from '../components/ParcelPartiesSection'
+import SurveyHistorySection from '../components/SurveyHistorySection'
+import DiscussionHistorySection from '../components/DiscussionHistorySection'
 import ParcelStatusBadge from '../components/ParcelStatusBadge'
 import { useParcelDetail } from '../hooks/useParcels'
 import { formatDate, formatDateTime, formatLuas, formatRupiah } from '../lib/format'
@@ -141,6 +144,20 @@ export default function ParcelDetailPage() {
       <LegalitiesSection parcelId={parcel.id} />
 
       <ParcelPartiesSection parcelId={parcel.id} />
+
+      <AcquisitionsSection parcelId={parcel.id} />
+
+      <DiscussionHistorySection
+        parcelId={parcel.id}
+        newDiscussionHref={`/pembahasan/baru?bidang=${parcel.id}`}
+        emptyText={`Catat pembahasan pertama untuk bidang ${parcel.kode}.`}
+      />
+
+      <SurveyHistorySection
+        parcelId={parcel.id}
+        newSurveyHref={`/survey/baru?bidang=${parcel.id}`}
+        emptyText={`Catat hasil survey pertama untuk bidang ${parcel.kode}.`}
+      />
     </div>
   )
 }

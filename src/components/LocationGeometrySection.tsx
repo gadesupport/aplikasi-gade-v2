@@ -29,16 +29,31 @@ function StatCell({ label, value }: { label: string; value: string }) {
   )
 }
 
+import GisImportModal from './GisImportModal'
+
+interface LocationGeometrySectionProps {
+  locationId: string
+  locationKode?: string
+  locationNama?: string
+  onImportSuccess?: () => void
+}
+
 // Section peta pada halaman detail lokasi. Mode view menampilkan batas
 // induk sebagai outline (AGENTS.md §17.1) + seluruh bidang pada lokasi +
 // statistik pemetaan (§17.6); mode edit membuka PolygonEditor dengan
 // snapping ke batas lokasi lain.
-export default function LocationGeometrySection({ locationId }: { locationId: string }) {
+export default function LocationGeometrySection({
+  locationId,
+  locationKode,
+  locationNama,
+  onImportSuccess,
+}: LocationGeometrySectionProps) {
   const { geometry, isLoading, error, reload } = useLocationGeometry(locationId)
-  const { collection: parcels } = useParcelsGeometries(locationId)
+  const { collection: parcels, reload: reloadParcels } = useParcelsGeometries(locationId)
   const { stats, isLoading: statsLoading, error: statsError, reload: reloadStats } =
     useLocationAreaStats(locationId)
   const [isEditing, setIsEditing] = useState(false)
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false)
   const [otherLocations, setOtherLocations] = useState<FeatureCollection>({
     type: 'FeatureCollection',
     features: [],
@@ -105,15 +120,60 @@ export default function LocationGeometrySection({ locationId }: { locationId: st
   return (
     <div className="rounded-xl border border-slate-200 bg-white">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-6 py-4">
-        <h2 className="text-base font-semibold text-slate-900">Batas Lokasi (Peta)</h2>
-        <button
-          type="button"
-          onClick={() => setIsEditing(true)}
-          className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-emerald-700"
-        >
-          {geometry ? 'Edit Batas' : 'Gambar Batas'}
-        </button>
+        <div>
+          <h2 className="text-base font-semibold text-slate-900">Batas Lokasi (Peta)</h2>
+          <p className="text-xs text-slate-500">
+            Visualisasi batas induk, bidang terpetakan, dan import GIS.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setIsImportModalOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-xs hover:bg-slate-50 transition"
+          >
+            <svg
+              className="h-4 w-4 text-emerald-600"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+              />
+            </svg>
+            Impor KML / SHP
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsEditing(true)}
+            className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white shadow-xs transition hover:bg-emerald-700"
+          >
+            {geometry ? 'Edit Batas' : 'Gambar Batas'}
+          </button>
+        </div>
       </div>
+
+      {isImportModalOpen && (
+        <GisImportModal
+          locationId={locationId}
+          locationLabel={
+            locationKode && locationNama ? `${locationKode} — ${locationNama}` : locationKode
+          }
+          parentGeometry={geometry}
+          existingParcels={parcels}
+          onClose={() => setIsImportModalOpen(false)}
+          onSuccess={() => {
+            reload()
+            reloadStats()
+            reloadParcels()
+            onImportSuccess?.()
+          }}
+        />
+      )}
 
       <div className="p-4">
         {error ? (

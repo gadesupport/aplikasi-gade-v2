@@ -1,11 +1,67 @@
-import { ServiceError, toServiceError } from '../lib/errors'
+import { isServiceError, ServiceError, toServiceError } from '../lib/errors'
 import { supabase } from '../lib/supabase'
-import { requireSupabase, unwrapQuery, unwrapQuerySingle } from './query'
+import { auditService } from './auditService'
+import { requireSupabase, sanitizeSearchTerm, unwrapQuery, unwrapQuerySingle, unwrapQueryWithCount } from './query'
+import type { Paginated } from '../types/pagination'
 import type { PartyRef } from '../types/party'
-import type { LegalityInput, LegalityRecord } from '../types/legality'
+import type { LegalityInput, LegalityRecord, LegalityStatus } from '../types/legality'
 
 const COLUMNS =
   'id, bidang_id, pihak_id, jenis_dokumen, nomor_dokumen, tanggal_dokumen, penerbit, status, catatan, created_at, updated_at, pihak:parties(id, nama, nik, nomor_telepon, tipe_pihak)'
+
+const LIST_COLUMNS =
+  'id, bidang_id, jenis_dokumen, nomor_dokumen, tanggal_dokumen, penerbit, status, created_at, bidang:land_parcels(id, kode, nomor_bidang, lokasi:locations(id, kode, nama)), pihak:parties(id, nama)'
+
+// Baris list global — embed bidang (dengan lokasinya) dan pihak.
+export interface LegalityListRow {
+  id: string
+  bidang_id: string
+  jenis_dokumen: LegalityRecord['jenis_dokumen']
+  nomor_dokumen: string | null
+  tanggal_dokumen: string | null
+  penerbit: string | null
+  status: LegalityStatus
+  created_at: string
+  bidang: {
+    id: string
+    kode: string
+    nomor_bidang: string | null
+    lokasi: { id: string; kode: string; nama: string } | null
+  } | null
+  pihak: { id: string; nama: string } | null
+}
+
+interface BidangRow {
+  id: string
+  kode: string
+  nomor_bidang: string | null
+  lokasi: { id: string; kode: string; nama: string } | { id: string; kode: string; nama: string }[] | null
+}
+
+interface PihakRow {
+  id: string
+  nama: string
+}
+
+interface LegalityListRowRaw extends Omit<LegalityListRow, 'bidang' | 'pihak'> {
+  bidang: BidangRow | BidangRow[] | null
+  pihak: PihakRow | PihakRow[] | null
+}
+
+function pick<T>(value: T | T[] | null): T | null {
+  return Array.isArray(value) ? (value[0] ?? null) : value
+}
+
+function toListRow(row: LegalityListRowRaw): LegalityListRow {
+  const bidangRaw = pick(row.bidang)
+  return {
+    ...row,
+    bidang: bidangRaw
+      ? { ...bidangRaw, lokasi: pick(bidangRaw.lokasi) }
+      : null,
+    pihak: pick(row.pihak),
+  }
+}
 
 // supabase-js mengetip embed many-to-one sebagai array meskipun runtime
 // mengembalikan objek tunggal — dinormalisasi lewat toLegality().
@@ -34,6 +90,50 @@ function mapInputToRow(input: Partial<LegalityInput>): Record<string, unknown> {
 }
 
 export const legalityService = {
+  // List global (menu Legalitas): filter status/jenis/lokasi + pencarian
+  // nomor dokumen/penerbit + pagination.
+  async list(params: {
+    search?: string
+    status?: LegalityStatus
+    jenis?: LegalityRecord['jenis_dokumen']
+    lokasiId?: string
+    page?: number
+    pageSize?: number
+  } = {}): Promise<Paginated<LegalityListRow>> {
+    requireSupabase()
+    const page = Math.max(1, Math.floor(params.page ?? 1))
+    const pageSize = Math.min(100, Math.max(1, Math.floor(params.pageSize ?? 20)))
+
+    let query = supabase.from('legalities').select(LIST_COLUMNS, { count: 'exact' })
+
+    const search = sanitizeSearchTerm(params.search ?? '')
+    if (search) {
+      const pattern = `%${search}%`
+      query = query.or(`nomor_dokumen.ilike.${pattern},penerbit.ilike.${pattern}`)
+    }
+    if (params.status) query = query.eq('status', params.status)
+    if (params.jenis) query = query.eq('jenis_dokumen', params.jenis)
+    if (params.lokasiId) {
+      const parcelIds =
+        (await unwrapQuery<{ id: string }[]>(
+          supabase.from('land_parcels').select('id').eq('lokasi_id', params.lokasiId).limit(5000),
+        )) ?? []
+      query = parcelIds.length > 0
+        ? query.in('bidang_id', parcelIds.map((row) => row.id))
+        : query.eq('bidang_id', '00000000-0000-0000-0000-000000000000')
+    }
+
+    query = query
+      .order('jenis_dokumen', { ascending: true })
+      .order('created_at', { ascending: false })
+
+    const from = (page - 1) * pageSize
+    query = query.range(from, from + pageSize - 1)
+
+    const { data, count } = await unwrapQueryWithCount<LegalityListRowRaw[]>(query)
+    return { data: data.map(toListRow), total: count, page, pageSize }
+  },
+
   // Semua baris legalitas satu bidang (checklist mengagregasi per jenis).
   async listByParcel(bidangId: string): Promise<LegalityRecord[]> {
     requireSupabase()
@@ -49,12 +149,30 @@ export const legalityService = {
     return rows.map(toLegality)
   },
 
+  async getById(id: string): Promise<LegalityRecord> {
+    requireSupabase()
+    try {
+      return toLegality(await unwrapQuerySingle<LegalityRow>(
+        supabase.from('legalities').select(COLUMNS).eq('id', id).single(),
+      ))
+    } catch (error) {
+      if (isServiceError(error) && error.code === 'PGRST116') {
+        throw new ServiceError('Data legalitas tidak ditemukan.', {
+          code: 'LEGALITY_NOT_FOUND',
+          cause: error,
+        })
+      }
+      throw error
+    }
+  },
+
   async create(input: LegalityInput): Promise<LegalityRecord> {
     requireSupabase()
-    const row = await unwrapQuerySingle<LegalityRow>(
+    const row = toLegality(await unwrapQuerySingle<LegalityRow>(
       supabase.from('legalities').insert(mapInputToRow(input)).select(COLUMNS).single(),
-    )
-    return toLegality(row)
+    ))
+    auditService.log('CREATE', 'LEGALITY', row.id, row.jenis_dokumen)
+    return row
   },
 
   async update(id: string, input: Partial<LegalityInput>): Promise<LegalityRecord> {
@@ -63,10 +181,12 @@ export const legalityService = {
     if (Object.keys(patch).length === 0) {
       throw new ServiceError('Tidak ada perubahan yang disimpan.')
     }
-    const row = await unwrapQuerySingle<LegalityRow>(
+    const row = toLegality(await unwrapQuerySingle<LegalityRow>(
       supabase.from('legalities').update(patch).eq('id', id).select(COLUMNS).single(),
-    )
-    return toLegality(row)
+    ))
+    auditService.log('UPDATE', 'LEGALITY', row.id, row.jenis_dokumen)
+    if (input.status !== undefined) auditService.log('STATUS_CHANGE', 'LEGALITY', row.id, row.jenis_dokumen + ' -> ' + row.status)
+    return row
   },
 
   async remove(id: string): Promise<void> {
@@ -76,5 +196,6 @@ export const legalityService = {
     if (!data || data.length === 0) {
       throw new ServiceError('Data legalitas tidak ditemukan.', { code: 'DELETE_FORBIDDEN' })
     }
+    auditService.log('DELETE', 'LEGALITY', id)
   },
 }
