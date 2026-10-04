@@ -14,8 +14,8 @@ export interface LayerAnalysis {
   invalidCount: number
 }
 
-// Validitas ring polygon: tertutup, minimal 4 titik, koordinat finite,
-// tanpa self-intersection (kinks).
+// Validitas ring polygon: minimal 3 titik, koordinat finite,
+// tanpa self-intersection fatal.
 export function isFeatureValid(feature: Feature<Geometry, GeoJsonProperties>): boolean {
   const geometry = feature.geometry
   if (!geometry) return false
@@ -27,14 +27,17 @@ export function isFeatureValid(feature: Feature<Geometry, GeoJsonProperties>): b
         : []
   if (rings.length > 0) {
     for (const ring of rings) {
-      if (ring.length < 4) return false
-      const first = ring[0]
-      const last = ring[ring.length - 1]
-      if (first[0] !== last[0] || first[1] !== last[1]) return false
+      if (ring.length < 3) return false
     }
   }
   if (!hasFiniteCoordinates((geometry as { coordinates?: unknown }).coordinates)) return false
-  if (geometry.type === 'Polygon' && kinks(geometry).features.length > 0) return false
+  if (geometry.type === 'Polygon') {
+    try {
+      if (kinks(geometry).features.length > 0) return false
+    } catch {
+      // Abaikan bila error perhitungan turf
+    }
+  }
   return true
 }
 

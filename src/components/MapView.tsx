@@ -143,6 +143,7 @@ export default function MapView({
         map.fitBounds(bounds, { padding: [24, 24] })
       }
     }
+    setTimeout(() => map.invalidateSize(), 50)
   }, [geojson, geojsonStyle, fitGeojson])
 
   useEffect(() => {
@@ -150,13 +151,21 @@ export default function MapView({
     if (!map) return
     overlayLayersRef.current.forEach((layer) => map.removeLayer(layer))
     overlayLayersRef.current = []
+    const bounds = L.latLngBounds([])
     for (const overlay of overlays) {
       if (!overlay.geojson) continue
       const layer = L.geoJSON(overlay.geojson, { style: overlay.style })
       layer.addTo(map)
       overlayLayersRef.current.push(layer)
+      const b = layer.getBounds()
+      if (b.isValid()) bounds.extend(b)
     }
-  }, [overlays])
+    // Jika tidak ada layer geojson utama, zoom ke overlays agar data langsung tampak
+    if (!geojson && bounds.isValid()) {
+      map.fitBounds(bounds, { padding: [24, 24] })
+    }
+    setTimeout(() => map.invalidateSize(), 50)
+  }, [overlays, geojson])
 
   return (
     <div className={cn('relative z-0', className ?? 'h-96 w-full')}>

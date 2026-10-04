@@ -115,5 +115,5 @@ function parseCoordinates(container: Element): Position[] {
       (position) =>
         position.length >= 2 && Number.isFinite(position[0]) && Number.isFinite(position[1]),
     )
-    .map((position) => position.slice(0, 3) as Position)
+    .map((position) => [position[0], position[1]] as Position)
 }
