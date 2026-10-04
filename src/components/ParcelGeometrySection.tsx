@@ -30,6 +30,8 @@ const GUIDE_OTHER_STYLE = {
   fill: false,
 }
 
+import GisImportModal from './GisImportModal'
+
 interface ParcelGeometrySectionProps {
   parcelId: string
   locationId: string
@@ -44,6 +46,7 @@ export default function ParcelGeometrySection({ parcelId, locationId }: ParcelGe
   const { geometry: parentGeometry, isLoading: parentLoading } = useLocationGeometry(locationId)
   const { collection: others, reload: reloadOthers } = useParcelsGeometries(locationId, parcelId)
   const [isEditing, setIsEditing] = useState(false)
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false)
 
   const activeFeature = useMemo<Feature | null>(
     () => (geometry ? { type: 'Feature', properties: {}, geometry } : null),
@@ -105,15 +108,56 @@ export default function ParcelGeometrySection({ parcelId, locationId }: ParcelGe
   return (
     <div className="rounded-xl border border-slate-200 bg-white">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-6 py-4">
-        <h2 className="text-base font-semibold text-slate-900">Polygon Bidang (Peta)</h2>
-        <button
-          type="button"
-          onClick={() => setIsEditing(true)}
-          className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-emerald-700"
-        >
-          {geometry ? 'Edit Polygon' : 'Gambar Polygon'}
-        </button>
+        <div>
+          <h2 className="text-base font-semibold text-slate-900">Polygon Bidang (Peta)</h2>
+          <p className="text-xs text-slate-500">
+            Visualisasi polygon bidang, batas induk, dan import GIS bidang tanah.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setIsImportModalOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-xs hover:bg-slate-50 transition"
+          >
+            <svg
+              className="h-4 w-4 text-emerald-600"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+              />
+            </svg>
+            Impor KML / SHP
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsEditing(true)}
+            className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white shadow-xs transition hover:bg-emerald-700"
+          >
+            {geometry ? 'Edit Polygon' : 'Gambar Polygon'}
+          </button>
+        </div>
       </div>
+
+      {isImportModalOpen && (
+        <GisImportModal
+          locationId={locationId}
+          parentGeometry={parentGeometry}
+          existingParcels={others}
+          initialTargetMode="PARCEL"
+          onClose={() => setIsImportModalOpen(false)}
+          onSuccess={() => {
+            reload()
+            reloadOthers()
+          }}
+        />
+      )}
 
       <div className="p-4">
         {error ? (

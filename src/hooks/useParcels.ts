@@ -15,6 +15,7 @@ interface ListState {
   result: Paginated<ParcelWithLocation>
   isLoading: boolean
   error: string | null
+  reload: () => void
 }
 
 // Daftar bidang tanah dengan pencarian ter-debounce 300ms, filter status &
@@ -27,7 +28,8 @@ export function useParcels({
   pageSize = 20,
 }: UseParcelsOptions): ListState {
   const [debouncedSearch, setDebouncedSearch] = useState(search)
-  const [state, setState] = useState<ListState>({
+  const [reloadCount, setReloadCount] = useState(0)
+  const [state, setState] = useState<Omit<ListState, 'reload'>>({
     result: { data: [], total: 0, page: 1, pageSize },
     isLoading: true,
     error: null,
@@ -64,9 +66,11 @@ export function useParcels({
     return () => {
       active = false
     }
-  }, [debouncedSearch, status, lokasiId, page, pageSize])
+  }, [debouncedSearch, status, lokasiId, page, pageSize, reloadCount])
 
-  return state
+  const reload = () => setReloadCount((count) => count + 1)
+
+  return { ...state, reload }
 }
 
 interface DetailState {

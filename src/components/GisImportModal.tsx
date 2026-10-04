@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ChangeEvent, DragEvent } from 'react'
 import type { FeatureCollection, GeoJsonObject, Polygon } from 'geojson'
 import MapView from './MapView'
@@ -19,6 +19,9 @@ import type {
   ImportResultCounts,
   ReferenceLayerKind,
 } from '../services/gisImportService'
+import { locationService } from '../services/locationService'
+import type { LocationOption } from '../services/locationService'
+import { mapService } from '../services/mapService'
 import { gisTemplateService } from '../services/gisTemplateService'
 import { useMappingTemplates } from '../hooks/useMappingTemplates'
 import { suggestMapping } from '../lib/gis/autoMap'
@@ -39,12 +42,13 @@ const STEP_LABELS: { step: Step; label: string }[] = [
 type TargetMode = 'PARENT' | 'PARCEL' | 'REFERENCE'
 
 interface GisImportModalProps {
-  locationId: string
+  locationId?: string
   locationLabel?: string
   parentGeometry?: Polygon | null
   existingParcels?: FeatureCollection
+  initialTargetMode?: TargetMode
   onClose: () => void
-  onSuccess: () => void
+  onSuccess?: () => void
 }
 
 const PARENT_OUTLINE_STYLE = { color: '#059669', weight: 2, fill: false, dashArray: '6 4' }
@@ -55,6 +59,7 @@ export default function GisImportModal({
   locationLabel,
   parentGeometry,
   existingParcels,
+  initialTargetMode,
   onClose,
   onSuccess,
 }: GisImportModalProps) {
@@ -67,7 +72,17 @@ export default function GisImportModal({
   const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null)
   const [confirmedCrs, setConfirmedCrs] = useState<string>(WGS84)
 
-  const [targetMode, setTargetMode] = useState<TargetMode>(parentGeometry ? 'PARCEL' : 'PARENT')
+  const [targetLocationId, setTargetLocationId] = useState<string>(locationId || '')
+  const [locationOptions, setLocationOptions] = useState<LocationOption[]>([])
+  const [fetchedParentGeom, setFetchedParentGeom] = useState<Polygon | null>(null)
+  const [fetchedExistingParcels, setFetchedExistingParcels] = useState<FeatureCollection>({
+    type: 'FeatureCollection',
+    features: [],
+  })
+
+  const [targetMode, setTargetMode] = useState<TargetMode>(
+    initialTargetMode ?? (parentGeometry ? 'PARCEL' : 'PARENT'),
+  )
   const [referenceKind, setReferenceKind] = useState<ReferenceLayerKind>('JALAN')
   const [mapping, setMapping] = useState<Record<string, GadeField>>({})
   const [fillLuasFromGeometry, setFillLuasFromGeometry] = useState(true)
@@ -77,6 +92,75 @@ export default function GisImportModal({
   const [importProgress, setImportProgress] = useState('')
   const [importError, setImportError] = useState<string | null>(null)
   const [counts, setCounts] = useState<ImportResultCounts | null>(null)
+
+  // Muat opsi lokasi jika belum ada atau saat modal dibuka
+  useEffect(() => {
+    let active = true
+    locationService
+      .listOptions()
+      .then((opts) => {
+        if (active) setLocationOptions(opts)
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [])
+
+  // Muat parent geometry dan existing parcels jika targetLocationId berubah
+  useEffect(() => {
+    if (!targetLocationId) {
+      setFetchedParentGeom(null)
+      setFetchedExistingParcels({ type: 'FeatureCollection', features: [] })
+      return
+    }
+
+    if (targetLocationId === locationId && parentGeometry !== undefined) {
+      setFetchedParentGeom(parentGeometry)
+      if (existingParcels) setFetchedExistingParcels(existingParcels)
+      return
+    }
+
+    let active = true
+    mapService
+      .getLocationGeometry(targetLocationId)
+      .then((geom) => {
+        if (active) setFetchedParentGeom(geom)
+      })
+      .catch(() => {
+        if (active) setFetchedParentGeom(null)
+      })
+
+    mapService
+      .getLocationParcelsGeometries(targetLocationId)
+      .then((fc) => {
+        if (active) setFetchedExistingParcels(fc)
+      })
+      .catch(() => {
+        if (active) setFetchedExistingParcels({ type: 'FeatureCollection', features: [] })
+      })
+
+    return () => {
+      active = false
+    }
+  }, [targetLocationId, locationId, parentGeometry, existingParcels])
+
+  const activeParentGeometry =
+    targetLocationId === locationId && parentGeometry !== undefined
+      ? parentGeometry
+      : fetchedParentGeom
+  const activeExistingParcels =
+    targetLocationId === locationId && existingParcels !== undefined
+      ? existingParcels
+      : fetchedExistingParcels
+
+  const activeLocation = locationOptions.find((l) => l.id === targetLocationId)
+  const effectiveLocationLabel =
+    targetLocationId === locationId && locationLabel
+      ? locationLabel
+      : activeLocation
+        ? `${activeLocation.kode} — ${activeLocation.nama}`
+        : targetLocationId || 'Belum dipilih'
 
   // Template mapping
   const { templates, reload: reloadTemplates } = useMappingTemplates()
@@ -126,20 +210,20 @@ export default function GisImportModal({
   // Overlays for MapView during preview
   const previewOverlays = useMemo<MapOverlay[]>(() => {
     const list: MapOverlay[] = []
-    if (parentGeometry) {
+    if (activeParentGeometry) {
       list.push({
-        geojson: { type: 'Feature', properties: {}, geometry: parentGeometry } as GeoJsonObject,
+        geojson: { type: 'Feature', properties: {}, geometry: activeParentGeometry } as GeoJsonObject,
         style: PARENT_OUTLINE_STYLE,
       })
     }
-    if (existingParcels && existingParcels.features.length > 0) {
+    if (activeExistingParcels && activeExistingParcels.features.length > 0) {
       list.push({
-        geojson: existingParcels,
+        geojson: activeExistingParcels,
         style: EXISTING_PARCEL_STYLE,
       })
     }
     return list
-  }, [parentGeometry, existingParcels])
+  }, [activeParentGeometry, activeExistingParcels])
 
   async function processFile(file: File) {
     setIsParsing(true)
@@ -216,7 +300,11 @@ export default function GisImportModal({
   }
 
   async function runImport() {
-    if (!layer || !locationId) return
+    if (!layer) return
+    if ((targetMode === 'PARENT' || targetMode === 'PARCEL') && !targetLocationId) {
+      setImportError('Silakan pilih lokasi induk target terlebih dahulu.')
+      return
+    }
     setIsImporting(true)
     setImportError(null)
     setImportProgress('Menyiapkan import…')
@@ -236,14 +324,14 @@ export default function GisImportModal({
         if (!firstPolygon) {
           throw new Error('Tidak ada polygon valid untuk dijadikan batas lokasi.')
         }
-        await gisImportService.importParentArea(locationId, firstPolygon.geometry)
+        await gisImportService.importParentArea(targetLocationId, firstPolygon.geometry)
         result.imported = 1
         result.invalid = mappedParcels.filter((p) => !p.valid).length
         result.skipped = Math.max(0, mappedParcels.length - 1 - result.invalid)
       } else if (targetMode === 'REFERENCE') {
         setImportProgress('Menyimpan layer referensi…')
         const imported = await gisImportService.importReferenceLayer({
-          lokasiId: locationId || null,
+          lokasiId: targetLocationId || null,
           jenis: referenceKind,
           nama: layer.name,
           sumber: parseResult?.fileName ?? 'import GIS',
@@ -253,7 +341,7 @@ export default function GisImportModal({
         result.invalid = reprojectedFeatures.length - imported
       } else {
         setImportProgress('Mengambil data bidang eksisting untuk cek duplikasi…')
-        const existingCodes = new Set(await gisImportService.getExistingParcelCodes(locationId))
+        const existingCodes = new Set(await gisImportService.getExistingParcelCodes(targetLocationId))
         const seenInFile = new Set<string>()
         const validParcels = mappedParcels.filter((p) => p.valid)
 
@@ -269,8 +357,8 @@ export default function GisImportModal({
 
           try {
             // Validasi server-side SEBELUM insert
-            await gisImportService.validateGeometry(locationId, parcel.geometry)
-            await gisImportService.importParcel(locationId, parcel, autoCreateParty && Boolean(parcel.namaPihak))
+            await gisImportService.validateGeometry(targetLocationId, parcel.geometry)
+            await gisImportService.importParcel(targetLocationId, parcel, autoCreateParty && Boolean(parcel.namaPihak))
             result.imported += 1
           } catch (err) {
             const message = err instanceof Error ? err.message : 'Gagal mengimpor fitur.'
@@ -311,7 +399,7 @@ export default function GisImportModal({
               Impor Data Spasial GIS (KML & SHP)
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              Lokasi Target: <span className="font-semibold text-slate-800">{locationLabel ?? locationId}</span>
+              Lokasi Target: <span className="font-semibold text-slate-800">{effectiveLocationLabel}</span>
             </p>
           </div>
           <button
@@ -534,6 +622,39 @@ export default function GisImportModal({
           {/* STEP 3: TARGET & FIELD MAPPING */}
           {step === 3 && layer && (
             <div className="space-y-6">
+              {/* Lokasi Induk Selector */}
+              <div className="rounded-xl border border-slate-200 bg-white p-4">
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                  Lokasi Induk Target <span className="text-red-500">*</span>:
+                </label>
+                {locationId && locationLabel ? (
+                  <div className="flex items-center justify-between rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-sm text-slate-800">
+                    <span className="font-medium">{effectiveLocationLabel}</span>
+                    <span className="text-xs text-slate-500 bg-slate-200 px-2 py-0.5 rounded">Terkunci</span>
+                  </div>
+                ) : (
+                  <div>
+                    <select
+                      value={targetLocationId}
+                      onChange={(e) => setTargetLocationId(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-emerald-500 focus:outline-hidden"
+                    >
+                      <option value="">-- Pilih Lokasi Induk Target --</option>
+                      {locationOptions.map((loc) => (
+                        <option key={loc.id} value={loc.id}>
+                          {loc.kode} — {loc.nama}
+                        </option>
+                      ))}
+                    </select>
+                    {!targetLocationId && (
+                      <p className="mt-1.5 text-xs text-red-600 font-medium">
+                        Pilih lokasi induk terlebih dahulu agar bidang dapat divalidasi dan dihubungkan ke lokasi yang sesuai.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* Target Mode Selection */}
               <div>
                 <h3 className="text-sm font-semibold text-slate-800 mb-2">Pilih Target Import untuk Lokasi Ini:</h3>
@@ -605,7 +726,7 @@ export default function GisImportModal({
                   </label>
                 </div>
 
-                {!parentGeometry && targetMode === 'PARCEL' && (
+                {!activeParentGeometry && targetMode === 'PARCEL' && targetLocationId && (
                   <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-xs text-amber-800 flex items-start gap-3 shadow-xs">
                     <svg className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -943,7 +1064,7 @@ export default function GisImportModal({
                     Tidak Ada Data yang Berhasil Disimpan (0 Berhasil)
                   </h3>
                   <p className="mt-1 text-xs text-amber-800 max-w-lg mx-auto">
-                    {!parentGeometry && targetMode === 'PARCEL'
+                    {!activeParentGeometry && targetMode === 'PARCEL'
                       ? 'Penyebab: Lokasi ini belum memiliki batas induk (parent area). PostGIS menolak bidang tanah jika batas lokasi belum dibuat. Silakan ubah target menjadi "Batas Induk Lokasi" terlebih dahulu.'
                       : 'Data tidak lolos validasi server PostGIS. Silakan periksa rincian penolakan di bawah ini.'}
                   </p>
@@ -1038,7 +1159,8 @@ export default function GisImportModal({
               <button
                 type="button"
                 onClick={() => setStep(4)}
-                className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white hover:bg-emerald-700 shadow-xs transition"
+                disabled={(targetMode === 'PARCEL' || targetMode === 'PARENT') && !targetLocationId}
+                className="rounded-lg bg-emerald-600 px-5 py-2 text-sm font-semibold text-white hover:bg-emerald-700 shadow-xs transition disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Lanjut ke Preview →
               </button>
@@ -1066,7 +1188,7 @@ export default function GisImportModal({
               <button
                 type="button"
                 onClick={() => {
-                  if (counts.imported > 0) {
+                  if (counts.imported > 0 && onSuccess) {
                     onSuccess()
                   }
                   onClose()

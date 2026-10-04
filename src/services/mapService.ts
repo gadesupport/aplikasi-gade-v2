@@ -164,4 +164,30 @@ export const mapService = {
     }))
     return { type: 'FeatureCollection', features }
   },
+
+  // Semua bidang bergeometry (opsional filter lokasi) — untuk tampilan peta sebaran bidang.
+  async getAllParcelsGeometries(locationId?: string): Promise<FeatureCollection> {
+    requireSupabase()
+    let query = supabase
+      .from('land_parcels')
+      .select('id, kode, nomor_bidang, geometry, lokasi_id')
+      .not('geometry', 'is', null)
+    if (locationId) query = query.eq('lokasi_id', locationId)
+    const rows =
+      (await unwrapQuery<
+        { id: string; kode: string; nomor_bidang: string | null; geometry: Polygon; lokasi_id: string }[]
+      >(query.limit(1000))) ?? []
+    const features: Feature[] = rows.map((row) => ({
+      type: 'Feature',
+      properties: {
+        id: row.id,
+        kode: row.kode,
+        nomor_bidang: row.nomor_bidang,
+        lokasi_id: row.lokasi_id,
+      },
+      geometry: row.geometry,
+    }))
+    return { type: 'FeatureCollection', features }
+  },
 }
+
