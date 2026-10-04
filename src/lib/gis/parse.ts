@@ -5,6 +5,7 @@ import { parseDxf } from './dxf'
 import { scanShapefileZip, parseShpZip } from './shapefile'
 import { analyzeFeatures } from './analyze'
 import { COMMON_CRS } from './crs'
+import { force2DGeometry } from './geometryHelpers'
 import type { GisFormat, GisLayer, GisParseResult } from './types'
 
 // Dispatcher parser + ANALYZE (§19 tahap 2). Semua format dinormalisasi
@@ -46,7 +47,13 @@ export async function parseGisFile(file: File): Promise<GisParseResult> {
     // DXF tidak membawa CRS → WAJIB user memilih (§22/§27).
   }
 
-  const analyzed: GisLayer[] = Object.entries(layers).map(([name, features], index) => {
+  const analyzed: GisLayer[] = Object.entries(layers).map(([name, rawFeatures], index) => {
+    // Normalisasi semua geometri menjadi 2D (buang dimensi Z/elevasi)
+    // agar kompatibel penuh dengan kolom PostGIS geometry(Polygon, 4326)
+    const features = rawFeatures.map((f) => ({
+      ...f,
+      geometry: f.geometry ? force2DGeometry(f.geometry) : f.geometry,
+    }))
     const analysis = analyzeFeatures(features)
     return {
       id: `layer-${index}`,

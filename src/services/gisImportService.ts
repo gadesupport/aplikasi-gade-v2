@@ -4,7 +4,7 @@ import { requireSupabase, unwrapQuery } from './query'
 import { auditService } from './auditService'
 import { isFeatureValid } from '../lib/gis/analyze'
 import area from '@turf/area'
-import type { Feature, GeoJsonProperties, Geometry, Polygon } from 'geojson'
+import type { Feature, GeoJsonProperties, Geometry, Polygon, Position } from 'geojson'
 import type { ParcelStatus } from '../types/parcel'
 import { GADE_FIELDS } from '../types/gisImport'
 import type { GadeField } from '../types/gisImport'
@@ -37,35 +37,39 @@ export interface MappedParcel {
   invalidReason: string | null
 }
 
-// Normalisasi geometry: jika Polygon atau MultiPolygon, pastikan ring tertutup
-// dan konversikan ke Polygon tunggal yang valid.
+import { force2DPolygon } from '../lib/gis/geometryHelpers'
+
+// Normalisasi geometry: jika Polygon atau MultiPolygon, pastikan ring tertutup,
+// buang dimensi Z (hanya 2D [lng, lat]), dan konversikan ke Polygon tunggal yang valid.
 export function normalizeToPolygon(geometry: Geometry | null | undefined): Polygon | null {
   if (!geometry) return null
   if (geometry.type === 'Polygon') {
     const closed = geometry.coordinates.map((ring) => {
-      if (ring.length < 3) return ring
-      const first = ring[0]
-      const last = ring[ring.length - 1]
+      const ring2D = ring.map((p) => [p[0], p[1]] as [number, number])
+      if (ring2D.length < 3) return ring2D
+      const first = ring2D[0]
+      const last = ring2D[ring2D.length - 1]
       if (first[0] !== last[0] || first[1] !== last[1]) {
-        return [...ring, [first[0], first[1], ...(first.slice(2) || [])]]
+        return [...ring2D, [first[0], first[1]]]
       }
-      return ring
+      return ring2D
     })
     return { type: 'Polygon', coordinates: closed }
   }
   if (geometry.type === 'MultiPolygon') {
     if (!geometry.coordinates || geometry.coordinates.length === 0) return null
     let maxArea = -1
-    let bestCoords: import('geojson').Position[][] | null = null
+    let bestCoords: Position[][] | null = null
     for (const part of geometry.coordinates) {
       const closedPart = part.map((ring) => {
-        if (ring.length < 3) return ring
-        const first = ring[0]
-        const last = ring[ring.length - 1]
+        const ring2D = ring.map((p) => [p[0], p[1]] as [number, number])
+        if (ring2D.length < 3) return ring2D
+        const first = ring2D[0]
+        const last = ring2D[ring2D.length - 1]
         if (first[0] !== last[0] || first[1] !== last[1]) {
-          return [...ring, [first[0], first[1], ...(first.slice(2) || [])]]
+          return [...ring2D, [first[0], first[1]]]
         }
-        return ring
+        return ring2D
       })
       const testFeature: Feature<Polygon> = {
         type: 'Feature',
@@ -183,9 +187,10 @@ export const gisImportService = {
   // Validasi server TANPA insert — RPC validate_parcel_geometry (§25).
   async validateGeometry(locationId: string, geometry: Polygon): Promise<void> {
     requireSupabase()
+    const cleanGeom = force2DPolygon(geometry)
     const { error } = await supabase.rpc('validate_parcel_geometry', {
       p_lokasi_id: locationId,
-      p_geojson: geometry,
+      p_geojson: cleanGeom,
     })
     if (error) {
       const message =
@@ -198,7 +203,8 @@ export const gisImportService = {
   // Import PARENT AREA (§25): simpan polygon batas lokasi.
   async importParentArea(locationId: string, geometry: Polygon): Promise<void> {
     const { mapService } = await import('./mapService')
-    await mapService.saveLocationGeometry(locationId, geometry)
+    const cleanGeom = force2DPolygon(geometry)
+    await mapService.saveLocationGeometry(locationId, cleanGeom)
     auditService.log('GIS_IMPORT', 'LOCATION', locationId, 'Import parent area')
   },
 
@@ -229,7 +235,8 @@ export const gisImportService = {
     try {
       // Simpan geometry (validasi ulang server-side, termasuk anti-overlap).
       const { mapService } = await import('./mapService')
-      await mapService.saveParcelGeometry(created.id, parcel.geometry)
+      const cleanGeom = parcel.geometry ? force2DPolygon(parcel.geometry) : null
+      await mapService.saveParcelGeometry(created.id, cleanGeom)
     } catch (error) {
       // Geometry gagal → batalkan parcel agar tidak ada bidang "tanah kosong".
       await parcelService.remove(created.id).catch(() => {})

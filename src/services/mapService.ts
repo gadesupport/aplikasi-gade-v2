@@ -23,6 +23,8 @@ export interface ParcelGuide {
   geometry: Polygon
 }
 
+import { force2DPolygon } from '../lib/gis/geometryHelpers'
+
 // Validasi ring polygon sebelum kirim: minimal 4 titik dan ring tertutup.
 function validatePolygon(polygon: Polygon): void {
   const ring = polygon.coordinates?.[0]
@@ -51,17 +53,18 @@ export const mapService = {
   // Simpan batas lokasi. Polygon null berarti hapus batas.
   async saveLocationGeometry(locationId: string, polygon: Polygon | null): Promise<void> {
     requireSupabase()
-    if (polygon) validatePolygon(polygon)
+    const cleanPolygon = polygon ? force2DPolygon(polygon) : null
+    if (cleanPolygon) validatePolygon(cleanPolygon)
     const { data, error } = await supabase
       .from('locations')
-      .update({ geometry: polygon })
+      .update({ geometry: cleanPolygon })
       .eq('id', locationId)
       .select('id')
     if (error) throw toServiceError(error)
     if (!data || data.length === 0) {
       throw new ServiceError('Lokasi tidak ditemukan.', { code: 'LOCATION_NOT_FOUND' })
     }
-    auditService.log('GEOMETRY_CHANGE', 'LOCATION', locationId, polygon ? 'Simpan batas induk' : 'Hapus batas induk')
+    auditService.log('GEOMETRY_CHANGE', 'LOCATION', locationId, cleanPolygon ? 'Simpan batas induk' : 'Hapus batas induk')
   },
 
   // Batas lokasi lain (exclude lokasi aktif) sebagai FeatureCollection
@@ -101,13 +104,14 @@ export const mapService = {
   // TIDAK tersimpan dan pesan errornya siap tampil ke user.
   async saveParcelGeometry(parcelId: string, polygon: Polygon | null): Promise<void> {
     requireSupabase()
-    if (polygon) validatePolygon(polygon)
+    const cleanPolygon = polygon ? force2DPolygon(polygon) : null
+    if (cleanPolygon) validatePolygon(cleanPolygon)
     const { error } = await supabase.rpc('save_parcel_geometry', {
       p_parcel_id: parcelId,
-      p_geojson: polygon,
+      p_geojson: cleanPolygon,
     })
     if (error) throw toServiceError(error)
-    auditService.log('GEOMETRY_CHANGE', 'LAND_PARCEL', parcelId, polygon ? 'Simpan polygon bidang' : 'Hapus polygon bidang')
+    auditService.log('GEOMETRY_CHANGE', 'LAND_PARCEL', parcelId, cleanPolygon ? 'Simpan polygon bidang' : 'Hapus polygon bidang')
   },
 
   // Statistik pemetaan satu lokasi (luas parent/bidang, sisa, coverage,
