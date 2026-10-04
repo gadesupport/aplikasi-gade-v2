@@ -90,7 +90,7 @@ begin
   exception when others then
     raise exception 'Data polygon tidak dapat dibaca. Gambar ulang polygon lalu simpan lagi.'
       using errcode = 'GDE00';
-  end if;
+  end;
 
   perform public.assert_parcel_geometry(p_lokasi_id, null, v_new);
 end;
@@ -118,7 +118,7 @@ begin
   exception when others then
     raise exception 'Data polygon tidak dapat dibaca. Gambar ulang polygon lalu simpan lagi.'
       using errcode = 'GDE00';
-  end if;
+  end;
 
   select lokasi_id into v_lokasi_id from public.land_parcels where id = p_parcel_id;
   if v_lokasi_id is null then
